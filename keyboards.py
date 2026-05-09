@@ -1,229 +1,196 @@
 """
-Клавиатуры и кнопки
+Локализация бота (русский)
 """
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
-from aiogram.utils.keyboard import InlineKeyboardBuilder
-from typing import List, Dict, Any
-from config import TIERS
-from locales import get_text
+
+TEXTS = {
+    # Старт
+    "welcome_new": """👋 <b>Привет!</b>
+
+Я отслеживаю Twitter аккаунты и мгновенно отправляю тебе новые твиты прямо в Telegram!
+
+⚡️ <b>Как это работает:</b>
+1. Добавляешь Twitter аккаунты
+2. Получаешь уведомления за секунды
+
+🎁 Попробуй бесплатный триал на 1 день!""",
+
+    "welcome_subscribed": """🏠 <b>Главное меню</b>
+
+📊 Подписка: <b>{tier}</b>
+⏰ Активна до: <b>{until}</b>
+👥 Аккаунтов: <b>{current}/{max}</b>""",
+
+    "welcome_expired": """⚠️ <b>Подписка истекла</b>
+
+Отслеживание приостановлено. Оформи подписку, чтобы продолжить!""",
+
+    # Бан
+    "banned": "🚫 Аккаунт заблокирован.",
+
+    # Триал
+    "trial_activated": """✅ <b>Триал активирован!</b>
+
+📅 Действует: <b>1 день</b>
+👤 Лимит: <b>1 аккаунт</b>
+
+Добавь первый Twitter аккаунт для отслеживания!""",
+
+    "trial_already_used": "❌ Вы уже использовали пробный период.",
+
+    # Аккаунты
+    "accounts_list": """📋 <b>Мои аккаунты</b> ({current}/{max})
+
+{accounts}""",
+
+    "accounts_empty": """📋 <b>Мои аккаунты</b> ({current}/{max})
+
+У вас пока нет отслеживаемых аккаунтов.""",
+
+    "account_added": "✅ Аккаунт <b>@{username}</b> добавлен!",
+    "account_removed": "🗑 Аккаунт <b>@{username}</b> удалён.",
+    "account_not_found": "❌ Twitter аккаунт <b>@{username}</b> не найден.",
+    "account_already_tracking": "⚠️ Вы уже отслеживаете <b>@{username}</b>.",
+    "account_limit_reached": "❌ Достигнут лимит аккаунтов ({max}). Повысьте тариф для добавления.",
+    "enter_username": "📝 Введите Twitter username (например: elonmusk или @elonmusk):",
+    "select_account_to_remove": "🗑 Выберите аккаунт для удаления:",
+    "no_subscription": "❌ Для отслеживания нужна подписка.",
+
+    # Фильтры
+    "filters_menu": """⚙️ <b>Фильтры уведомлений</b>
+
+Выберите, какие твиты получать:""",
+
+    "filter_retweets": "🔄 Ретвиты: {status}",
+    "filter_replies": "💬 Ответы: {status}",
+    "filter_on": "✅ ВКЛ",
+    "filter_off": "❌ ВЫКЛ",
+    "filter_updated": "✅ Фильтр обновлён!",
+
+    # Подписка
+    "subscription_choose": """💎 <b>Выберите тариф</b>
+
+🥉 <b>Starter</b> — $5/мес
+   └ 5 аккаунтов
+
+🥈 <b>Pro</b> — $10/мес
+   └ 10 аккаунтов
+
+🥇 <b>Business</b> — $15/мес
+   └ 15 аккаунтов""",
+
+    "subscription_active": """💎 <b>Ваша подписка</b>
+
+📊 Тариф: <b>{tier}</b>
+💰 Цена: <b>${price}/мес</b>
+👥 Лимит: <b>{max} аккаунтов</b>
+⏰ Активна до: <b>{until}</b>
+📅 Осталось: <b>{days_left} дн.</b>""",
+
+    "choose_currency": "💳 Выберите валюту оплаты:",
+    
+    "invoice_created": """💳 <b>Счёт создан</b>
+
+💰 Сумма: <b>{amount} {currency}</b>
+📊 Тариф: <b>{tier}</b>
+
+Нажмите кнопку ниже для оплаты:""",
+
+    "payment_success": """✅ <b>Оплата успешна!</b>
+
+📊 Тариф: <b>{tier}</b>
+⏰ Активен до: <b>{until}</b>
+
+Спасибо за покупку! 🎉""",
+
+    "balance_used": "💰 С баланса списано: <b>${amount}</b>",
+    "balance_partial": "💰 С баланса списано: <b>${balance}</b>\n💳 К оплате: <b>{amount} {currency}</b>",
+
+    # Рефералка
+    "referral_menu": """👥 <b>Реферальная программа</b>
+
+Приглашай друзей и получай <b>10%</b> от каждой их оплаты навсегда!
+
+🔗 <b>Твоя ссылка:</b>
+<code>{link}</code>
+
+📊 <b>Статистика:</b>
+├ Приглашено: <b>{invited}</b>
+├ Оплатили: <b>{paid}</b>
+└ Заработано: <b>${earned}</b>
+
+💰 <b>Баланс:</b> ${balance}
+<i>Используется для оплаты подписки</i>""",
+
+    # Помощь
+    "help": """❓ <b>Помощь</b>
+
+<b>Как пользоваться:</b>
+1. Оформите подписку или активируйте триал
+2. Добавьте Twitter аккаунты для отслеживания
+3. Настройте фильтры по желанию
+4. Получайте уведомления мгновенно!
+
+<b>Вопросы?</b>
+Пишите: @{support}""",
+
+    # Алерты
+    "alert_new_post": "📝 <b>Новый пост от @{username}</b>",
+    "alert_retweet": "🔄 <b>Ретвит от @{username}</b>",
+    "alert_reply": "💬 <b>Ответ от @{username}</b>",
+    "alert_footer": "\n\n🕐 {date} МСК\n🔗 {link}",
+
+    # Напоминания
+    "reminder_3_days": "⏰ Подписка истекает через <b>3 дня</b>!",
+    "reminder_2_days": "⏰ Осталось <b>2 дня</b> подписки!",
+    "reminder_1_day": "🚨 Подписка истекает <b>ЗАВТРА</b>!",
+    "subscription_expired": """❌ <b>Подписка истекла</b>
+
+Отслеживание приостановлено. Оформите подписку, чтобы продолжить.""",
+
+    # Админка
+    "admin_stats": """📊 <b>Статистика бота</b>
+
+👥 Всего юзеров: <b>{total_users}</b>
+💎 Активных подписок: <b>{active_subs}</b>
+├ Starter: <b>{starter}</b>
+├ Pro: <b>{pro}</b>
+└ Business: <b>{business}</b>
+
+💰 Доход всего: <b>${total_income}</b>
+📈 За месяц: <b>${month_income}</b>
+
+🔄 Отслеживается аккаунтов: <b>{tracking}</b>
+🚫 Забанено: <b>{banned}</b>""",
+
+    "admin_balance_given": "✅ Юзеру @{username} начислено <b>${amount}</b>",
+    "admin_user_banned": "🚫 Юзер @{username} забанен",
+    "admin_user_unbanned": "✅ Юзер @{username} разбанен",
+    "admin_user_not_found": "❌ Юзер не найден",
+
+    # Кнопки
+    "btn_trial": "🎁 Триал 1 день",
+    "btn_subscribe": "💎 Оформить подписку",
+    "btn_my_accounts": "📋 Мои аккаунты ({current}/{max})",
+    "btn_filters": "⚙️ Фильтры",
+    "btn_subscription": "💎 Подписка",
+    "btn_referral": "👥 Рефералка",
+    "btn_help": "❓ Помощь",
+    "btn_back": "◀️ Назад",
+    "btn_add_account": "➕ Добавить",
+    "btn_remove_account": "🗑 Удалить",
+    "btn_extend": "🔄 Продлить",
+    "btn_upgrade": "⬆️ Повысить тариф",
+    "btn_pay": "💳 Оплатить",
+    "btn_cancel": "❌ Отмена",
+}
 
 
-def main_menu_keyboard(current: int, max_accounts: int) -> InlineKeyboardMarkup:
-    """Главное меню"""
-    builder = InlineKeyboardBuilder()
-    
-    builder.row(
-        InlineKeyboardButton(
-            text=f"📋 Мои аккаунты ({current}/{max_accounts})",
-            callback_data="accounts"
-        )
-    )
-    builder.row(
-        InlineKeyboardButton(text="⚙️ Фильтры", callback_data="filters"),
-        InlineKeyboardButton(text="💎 Подписка", callback_data="subscription")
-    )
-    builder.row(
-        InlineKeyboardButton(text="👥 Рефералка", callback_data="referral"),
-        InlineKeyboardButton(text="❓ Помощь", callback_data="help")
-    )
-    
-    return builder.as_markup()
-
-
-def welcome_keyboard(trial_available: bool = True) -> InlineKeyboardMarkup:
-    """Клавиатура приветствия для новых юзеров"""
-    builder = InlineKeyboardBuilder()
-    
-    if trial_available:
-        builder.row(
-            InlineKeyboardButton(text="🎁 Триал 1 день", callback_data="trial")
-        )
-    
-    builder.row(
-        InlineKeyboardButton(text="💎 Оформить подписку", callback_data="subscription")
-    )
-    
-    return builder.as_markup()
-
-
-def expired_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура для истекшей подписки"""
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(text="💎 Оформить подписку", callback_data="subscription")
-    )
-    builder.row(
-        InlineKeyboardButton(text="👥 Рефералка", callback_data="referral"),
-        InlineKeyboardButton(text="❓ Помощь", callback_data="help")
-    )
-    return builder.as_markup()
-
-
-def back_keyboard(callback_data: str = "main") -> InlineKeyboardMarkup:
-    """Кнопка назад"""
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(text="◀️ Назад", callback_data=callback_data)
-    )
-    return builder.as_markup()
-
-
-def accounts_keyboard(accounts: List[Dict[str, Any]], can_add: bool = True) -> InlineKeyboardMarkup:
-    """Клавиатура для списка аккаунтов"""
-    builder = InlineKeyboardBuilder()
-    
-    if can_add:
-        builder.row(
-            InlineKeyboardButton(text="➕ Добавить", callback_data="add_account")
-        )
-    
-    if accounts:
-        builder.row(
-            InlineKeyboardButton(text="🗑 Удалить", callback_data="remove_account")
-        )
-    
-    builder.row(
-        InlineKeyboardButton(text="◀️ Назад", callback_data="main")
-    )
-    
-    return builder.as_markup()
-
-
-def remove_accounts_keyboard(accounts: List[Dict[str, Any]]) -> InlineKeyboardMarkup:
-    """Клавиатура для удаления аккаунтов"""
-    builder = InlineKeyboardBuilder()
-    
-    for acc in accounts:
-        builder.row(
-            InlineKeyboardButton(
-                text=f"❌ @{acc['twitter_username']}",
-                callback_data=f"del_{acc['twitter_username']}"
-            )
-        )
-    
-    builder.row(
-        InlineKeyboardButton(text="◀️ Назад", callback_data="accounts")
-    )
-    
-    return builder.as_markup()
-
-
-def filters_keyboard(filter_retweets: bool, filter_replies: bool) -> InlineKeyboardMarkup:
-    """Клавиатура фильтров"""
-    builder = InlineKeyboardBuilder()
-    
-    rt_status = "✅ ВКЛ" if filter_retweets else "❌ ВЫКЛ"
-    rp_status = "✅ ВКЛ" if filter_replies else "❌ ВЫКЛ"
-    
-    builder.row(
-        InlineKeyboardButton(
-            text=f"🔄 Ретвиты: {rt_status}",
-            callback_data="toggle_retweets"
-        )
-    )
-    builder.row(
-        InlineKeyboardButton(
-            text=f"💬 Ответы: {rp_status}",
-            callback_data="toggle_replies"
-        )
-    )
-    builder.row(
-        InlineKeyboardButton(text="◀️ Назад", callback_data="main")
-    )
-    
-    return builder.as_markup()
-
-
-def subscription_tiers_keyboard(current_tier: str = None) -> InlineKeyboardMarkup:
-    """Выбор тарифа"""
-    builder = InlineKeyboardBuilder()
-    
-    tier_icons = {"starter": "🥉", "pro": "🥈", "business": "🥇"}
-    
-    for tier_id, tier_data in TIERS.items():
-        if current_tier and tier_id == current_tier:
-            continue  # Не показываем текущий тариф
-        
-        icon = tier_icons.get(tier_id, "💎")
-        builder.row(
-            InlineKeyboardButton(
-                text=f"{icon} {tier_data['name']} — ${tier_data['price']}/мес",
-                callback_data=f"tier_{tier_id}"
-            )
-        )
-    
-    builder.row(
-        InlineKeyboardButton(text="◀️ Назад", callback_data="main")
-    )
-    
-    return builder.as_markup()
-
-
-def currency_keyboard(tier: str) -> InlineKeyboardMarkup:
-    """Выбор валюты оплаты"""
-    builder = InlineKeyboardBuilder()
-    
-    builder.row(
-        InlineKeyboardButton(text="💎 TON", callback_data=f"pay_{tier}_TON"),
-        InlineKeyboardButton(text="💵 USDT", callback_data=f"pay_{tier}_USDT")
-    )
-    builder.row(
-        InlineKeyboardButton(text="◀️ Назад", callback_data="subscription")
-    )
-    
-    return builder.as_markup()
-
-
-def active_subscription_keyboard(can_upgrade: bool = True) -> InlineKeyboardMarkup:
-    """Клавиатура для активной подписки"""
-    builder = InlineKeyboardBuilder()
-    
-    builder.row(
-        InlineKeyboardButton(text="🔄 Продлить", callback_data="extend_sub")
-    )
-    
-    if can_upgrade:
-        builder.row(
-            InlineKeyboardButton(text="⬆️ Повысить тариф", callback_data="upgrade_sub")
-        )
-    
-    builder.row(
-        InlineKeyboardButton(text="◀️ Назад", callback_data="main")
-    )
-    
-    return builder.as_markup()
-
-
-def payment_keyboard(pay_url: str, invoice_id: str) -> InlineKeyboardMarkup:
-    """Кнопка оплаты"""
-    builder = InlineKeyboardBuilder()
-    
-    builder.row(
-        InlineKeyboardButton(text="💳 Оплатить", url=pay_url)
-    )
-    builder.row(
-        InlineKeyboardButton(text="✅ Проверить оплату", callback_data=f"check_{invoice_id}")
-    )
-    builder.row(
-        InlineKeyboardButton(text="❌ Отмена", callback_data="subscription")
-    )
-    
-    return builder.as_markup()
-
-
-def extend_keyboard() -> InlineKeyboardMarkup:
-    """Кнопка продления из напоминания"""
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(text="🔄 Продлить", callback_data="extend_sub")
-    )
-    return builder.as_markup()
-
-
-def cancel_keyboard() -> InlineKeyboardMarkup:
-    """Кнопка отмены"""
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(text="❌ Отмена", callback_data="main")
-    )
-    return builder.as_markup()
+def get_text(key: str, **kwargs) -> str:
+    """Получить текст с подстановкой параметров"""
+    text = TEXTS.get(key, key)
+    if kwargs:
+        try:
+            text = text.format(**kwargs)
+        except KeyError:
+            pass
+    return text
