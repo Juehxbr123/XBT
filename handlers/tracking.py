@@ -7,16 +7,13 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from datetime import datetime
 from database import db
-from keyboards import (
-    accounts_keyboard,
-    remove_accounts_keyboard,
-    cancel_keyboard,
-    back_keyboard
-)
+from keyboards import accounts_keyboard, remove_accounts_keyboard, cancel_keyboard, main_menu_keyboard
 from locales import get_text
 from config import TIERS, TRIAL_ACCOUNTS
 from services.twitter import twitter_service
+import logging
 
+logger = logging.getLogger(__name__)
 router = Router()
 
 
@@ -28,19 +25,16 @@ def get_account_limit(tier: str) -> int:
     """Получить лимит аккаунтов по тарифу"""
     if tier == "trial":
         return TRIAL_ACCOUNTS
-    tier_data = TIERS.get(tier)
-    return tier_data["accounts"] if tier_data else 0
+    return TIERS.get(tier, {}).get("accounts", 0)
 
 
 async def is_subscription_active(user: dict) -> bool:
     """Проверить активна ли подписка"""
     if not user.get("tier") or not user.get("subscription_until"):
         return False
-    
     until = user["subscription_until"]
     if isinstance(until, str):
         until = datetime.fromisoformat(until)
-    
     return until > datetime.now()
 
 
@@ -52,18 +46,12 @@ async def callback_accounts(callback: CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
     
-    if not user:
-        await callback.answer("Ошибка")
-        return
-    
-    if user.get("banned"):
-        await callback.message.edit_text(get_text("banned"))
+    if not user or user.get("banned"):
         return
     
     accounts = await db.get_user_tracking(user_id)
     current = len(accounts)
     max_accounts = get_account_limit(user.get("tier", ""))
-    
     can_add = current < max_accounts and await is_subscription_active(user)
     
     if accounts:
@@ -94,18 +82,16 @@ async def callback_add_account(callback: CallbackQuery, state: FSMContext):
         await callback.answer(get_text("no_subscription"), show_alert=True)
         return
     
-    # Проверяем лимит
     current = await db.get_user_tracking_count(user_id)
     max_accounts = get_account_limit(user.get("tier", ""))
     
     if current >= max_accounts:
-        await callback.answer(
-            get_text("account_limit_reached", max=max_accounts),
-            show_alert=True
-        )
+        await callback.answer(get_text("account_limit_reached", max=max_accounts), show_alert=True)
         return
     
+    # Устанавливаем состояние
     await state.set_state(AddAccountStates.waiting_username)
+    logger.info(f"User {user_id} started adding account, state set to waiting_username")
     
     await callback.message.edit_text(
         get_text("enter_username"),
@@ -116,22 +102,48 @@ async def callback_add_account(callback: CallbackQuery, state: FSMContext):
 
 
 @router.message(AddAccountStates.waiting_username)
-async def process_username(message: Message, state: FSMContext):
+async def process_username_input(message: Message, state: FSMContext):
     """Обработка введённого username"""
     user_id = message.from_user.id
+    
+    logger.info(f"Received username input from {user_id}: {message.text}")
+    
     user = await db.get_user(user_id)
     
-    if not user or not await is_subscription_active(user):
+    if not user:
+        await state.clear()
+        await message.answer("Напишите /start")
+        return
+    
+    if not await is_subscription_active(user):
         await state.clear()
         await message.answer(get_text("no_subscription"))
         return
     
     # Очищаем username
-    username = message.text.strip().lstrip("@").lower()
+    raw_input = message.text.strip() if message.text else ""
+    username = raw_input.lstrip("@").lower()
     
-    if not username or len(username) > 15 or not username.replace("_", "").isalnum():
+    logger.info(f"Cleaned username: {username}")
+    
+    # Валидация
+    if not username:
         await message.answer(
-            "❌ Неверный формат username. Попробуйте снова:",
+            "❌ Введите username. Например: elonmusk или @elonmusk",
+            reply_markup=cancel_keyboard()
+        )
+        return
+    
+    if len(username) > 15:
+        await message.answer(
+            "❌ Username слишком длинный (макс 15 символов)",
+            reply_markup=cancel_keyboard()
+        )
+        return
+    
+    if not username.replace("_", "").isalnum():
+        await message.answer(
+            "❌ Username содержит недопустимые символы",
             reply_markup=cancel_keyboard()
         )
         return
@@ -156,9 +168,15 @@ async def process_username(message: Message, state: FSMContext):
         return
     
     # Проверяем существование в Twitter
-    status_msg = await message.answer("⏳ Проверяю аккаунт...")
+    status_msg = await message.answer("⏳ Проверяю аккаунт в Twitter...")
     
-    exists, user_id_twitter = await twitter_service.check_user_exists(username)
+    try:
+        exists, twitter_user_id = await twitter_service.check_user_exists(username)
+        logger.info(f"Twitter check for @{username}: exists={exists}, user_id={twitter_user_id}")
+    except Exception as e:
+        logger.error(f"Twitter check error for @{username}: {e}")
+        exists = False
+        twitter_user_id = None
     
     if not exists:
         await status_msg.edit_text(
@@ -173,6 +191,7 @@ async def process_username(message: Message, state: FSMContext):
     
     if success:
         await state.clear()
+        logger.info(f"User {user_id} added tracking for @{username}")
         
         # Обновляем список
         accounts = await db.get_user_tracking(user_id)
@@ -198,8 +217,7 @@ async def process_username(message: Message, state: FSMContext):
 @router.callback_query(F.data == "remove_account")
 async def callback_remove_account(callback: CallbackQuery):
     """Выбор аккаунта для удаления"""
-    user_id = callback.from_user.id
-    accounts = await db.get_user_tracking(user_id)
+    accounts = await db.get_user_tracking(callback.from_user.id)
     
     if not accounts:
         await callback.answer("Нет аккаунтов для удаления")
@@ -221,13 +239,11 @@ async def callback_delete_account(callback: CallbackQuery):
     user = await db.get_user(user_id)
     
     if not user:
-        await callback.answer("Ошибка")
         return
     
-    # Удаляем
     await db.remove_tracking(user_id, username)
+    logger.info(f"User {user_id} removed tracking for @{username}")
     
-    # Обновляем список
     accounts = await db.get_user_tracking(user_id)
     current = len(accounts)
     max_accounts = get_account_limit(user.get("tier", ""))
