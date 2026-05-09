@@ -4,7 +4,7 @@
 import aiosqlite
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
-from config import DATABASE_PATH, TIERS
+from config import DATABASE_PATH
 import asyncio
 import logging
 
@@ -88,6 +88,7 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_tracking_username ON tracking(twitter_username);
             CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id);
             CREATE INDEX IF NOT EXISTS idx_payments_invoice ON payments(invoice_id);
+            CREATE INDEX IF NOT EXISTS idx_users_referred_by ON users(referred_by);
         """)
         await self._connection.commit()
 
@@ -144,7 +145,9 @@ class Database:
         
         if extend and user.get("subscription_until"):
             # Продление: добавляем к текущей дате истечения
-            current_until = datetime.fromisoformat(user["subscription_until"])
+            current_until = user["subscription_until"]
+            if isinstance(current_until, str):
+                current_until = datetime.fromisoformat(current_until)
             if current_until > now:
                 base_date = current_until
             else:
@@ -219,8 +222,9 @@ class Database:
 
     async def get_user_by_username(self, username: str) -> Optional[Dict[str, Any]]:
         """Найти пользователя по username"""
+        clean_username = username.lstrip("@").lower()
         async with self._connection.execute(
-            "SELECT * FROM users WHERE username = ?", (username.lstrip("@"),)
+            "SELECT * FROM users WHERE LOWER(username) = ?", (clean_username,)
         ) as cursor:
             row = await cursor.fetchone()
             return dict(row) if row else None
@@ -254,6 +258,60 @@ class Database:
         ) as cursor:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
+
+    # ============ REFERRALS ============
+
+    async def get_user_referrals(self, user_id: int) -> List[Dict[str, Any]]:
+        """Получить список приглашённых пользователей"""
+        async with self._connection.execute(
+            """SELECT u.user_id, u.username, 
+                      (SELECT COUNT(*) FROM referrals r WHERE r.referred_id = u.user_id AND r.referrer_id = ?) > 0 as has_paid
+               FROM users u 
+               WHERE u.referred_by = ?
+               ORDER BY u.created_at DESC""",
+            (user_id, user_id)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def add_referral_commission(self, referrer_id: int, referred_id: int, 
+                                      payment_amount: float, commission: float):
+        """Начислить реферальную комиссию"""
+        async with self._lock:
+            await self._connection.execute(
+                """INSERT INTO referrals (referrer_id, referred_id, payment_amount, commission)
+                   VALUES (?, ?, ?, ?)""",
+                (referrer_id, referred_id, payment_amount, commission)
+            )
+            await self._connection.execute(
+                "UPDATE users SET balance = balance + ? WHERE user_id = ?",
+                (commission, referrer_id)
+            )
+            await self._connection.commit()
+
+    async def get_referral_stats(self, user_id: int) -> Dict[str, Any]:
+        """Статистика рефералов"""
+        # Приглашённые
+        async with self._connection.execute(
+            "SELECT COUNT(*) as cnt FROM users WHERE referred_by = ?", (user_id,)
+        ) as cursor:
+            invited = (await cursor.fetchone())["cnt"]
+        
+        # Оплатившие (уникальные)
+        async with self._connection.execute(
+            "SELECT COUNT(DISTINCT referred_id) as cnt FROM referrals WHERE referrer_id = ?",
+            (user_id,)
+        ) as cursor:
+            paid = (await cursor.fetchone())["cnt"]
+        
+        # Заработано
+        async with self._connection.execute(
+            "SELECT COALESCE(SUM(commission), 0) as total FROM referrals WHERE referrer_id = ?",
+            (user_id,)
+        ) as cursor:
+            earned = (await cursor.fetchone())["total"]
+        
+        return {"invited": invited, "paid": paid, "earned": round(earned, 2)}
 
     # ============ TRACKING ============
 
@@ -340,26 +398,6 @@ class Database:
             row = await cursor.fetchone()
             return row["last_tweet_id"] if row else None
 
-    async def trim_tracking_to_limit(self, user_id: int, limit: int):
-        """Обрезать tracking до лимита (оставить первые N по дате)"""
-        async with self._connection.execute(
-            """SELECT id FROM tracking 
-               WHERE user_id = ? 
-               ORDER BY added_at 
-               LIMIT -1 OFFSET ?""",
-            (user_id, limit)
-        ) as cursor:
-            rows = await cursor.fetchall()
-            ids_to_delete = [row["id"] for row in rows]
-        
-        if ids_to_delete:
-            placeholders = ",".join("?" * len(ids_to_delete))
-            await self._connection.execute(
-                f"DELETE FROM tracking WHERE id IN ({placeholders})",
-                ids_to_delete
-            )
-            await self._connection.commit()
-
     # ============ PAYMENTS ============
 
     async def create_payment(self, user_id: int, amount: float, currency: str, 
@@ -397,58 +435,15 @@ class Database:
         )
         await self._connection.commit()
 
-    # ============ REFERRALS ============
-
-    async def add_referral_commission(self, referrer_id: int, referred_id: int, 
-                                      payment_amount: float, commission: float):
-        """Начислить реферальную комиссию"""
-        async with self._lock:
-            await self._connection.execute(
-                """INSERT INTO referrals (referrer_id, referred_id, payment_amount, commission)
-                   VALUES (?, ?, ?, ?)""",
-                (referrer_id, referred_id, payment_amount, commission)
-            )
-            await self._connection.execute(
-                "UPDATE users SET balance = balance + ? WHERE user_id = ?",
-                (commission, referrer_id)
-            )
-            await self._connection.commit()
-
-    async def get_referral_stats(self, user_id: int) -> Dict[str, Any]:
-        """Статистика рефералов"""
-        # Приглашённые
-        async with self._connection.execute(
-            "SELECT COUNT(*) as cnt FROM users WHERE referred_by = ?", (user_id,)
-        ) as cursor:
-            invited = (await cursor.fetchone())["cnt"]
-        
-        # Оплатившие (уникальные)
-        async with self._connection.execute(
-            "SELECT COUNT(DISTINCT referred_id) as cnt FROM referrals WHERE referrer_id = ?",
-            (user_id,)
-        ) as cursor:
-            paid = (await cursor.fetchone())["cnt"]
-        
-        # Заработано
-        async with self._connection.execute(
-            "SELECT COALESCE(SUM(commission), 0) as total FROM referrals WHERE referrer_id = ?",
-            (user_id,)
-        ) as cursor:
-            earned = (await cursor.fetchone())["total"]
-        
-        return {"invited": invited, "paid": paid, "earned": round(earned, 2)}
-
     # ============ ADMIN STATS ============
 
     async def get_admin_stats(self) -> Dict[str, Any]:
         """Статистика для админа"""
         stats = {}
         
-        # Всего юзеров
         async with self._connection.execute("SELECT COUNT(*) as cnt FROM users") as cursor:
             stats["total_users"] = (await cursor.fetchone())["cnt"]
         
-        # По тарифам
         for tier in ["starter", "pro", "business"]:
             async with self._connection.execute(
                 "SELECT COUNT(*) as cnt FROM users WHERE tier = ? AND subscription_until > datetime('now')",
@@ -458,13 +453,11 @@ class Database:
         
         stats["active_subs"] = stats["starter"] + stats["pro"] + stats["business"]
         
-        # Доход
         async with self._connection.execute(
             "SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE status = 'paid'"
         ) as cursor:
             stats["total_income"] = round((await cursor.fetchone())["total"], 2)
         
-        # За месяц
         month_ago = (datetime.now() - timedelta(days=30)).isoformat()
         async with self._connection.execute(
             "SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE status = 'paid' AND paid_at > ?",
@@ -472,13 +465,11 @@ class Database:
         ) as cursor:
             stats["month_income"] = round((await cursor.fetchone())["total"], 2)
         
-        # Отслеживаемых аккаунтов
         async with self._connection.execute(
             "SELECT COUNT(DISTINCT twitter_username) as cnt FROM tracking"
         ) as cursor:
             stats["tracking"] = (await cursor.fetchone())["cnt"]
         
-        # Забанено
         async with self._connection.execute(
             "SELECT COUNT(*) as cnt FROM users WHERE banned = 1"
         ) as cursor:
