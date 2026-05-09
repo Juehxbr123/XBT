@@ -42,14 +42,16 @@ TEXTS = {
 
 {accounts}""",
 
-    "accounts_empty": "📋 <b>Мои аккаунты</b> ({current}/{max})\n\nУ вас пока нет отслеживаемых аккаунтов.",
+    "accounts_empty": """📋 <b>Мои аккаунты</b> ({current}/{max})
+
+У вас пока нет отслеживаемых аккаунтов.""",
 
     "account_added": "✅ Аккаунт <b>@{username}</b> добавлен!",
     "account_removed": "🗑 Аккаунт <b>@{username}</b> удалён.",
     "account_not_found": "❌ Twitter аккаунт <b>@{username}</b> не найден.",
     "account_already_tracking": "⚠️ Вы уже отслеживаете <b>@{username}</b>.",
     "account_limit_reached": "❌ Достигнут лимит аккаунтов ({max}). Повысьте тариф для добавления.",
-    "enter_username": "📝 Введите Twitter username (например: @elonmusk или elonmusk):",
+    "enter_username": "📝 Введите Twitter username (например: elonmusk или @elonmusk):",
     "select_account_to_remove": "🗑 Выберите аккаунт для удаления:",
     "no_subscription": "❌ Для отслеживания нужна подписка.",
 
