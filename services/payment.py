@@ -3,6 +3,7 @@ CryptoBot Payment Service
 """
 import httpx
 from typing import Optional, Dict, Any, Tuple
+from aiogram import Bot
 from config import CRYPTOBOT_TOKEN, CRYPTOBOT_API_URL, TIERS, REFERRAL_PERCENT
 from database import db
 import logging
@@ -68,7 +69,7 @@ class PaymentService:
                     amount=price_usd,
                     currency="BALANCE",
                     tier=tier,
-                    invoice_id=f"balance_{user_id}_{tier}"
+                    invoice_id=f"balance_{user_id}_{tier}_{payment_id}"
                 )
                 
                 return f"balance_{payment_id}", None, 0, balance_used
@@ -91,8 +92,6 @@ class PaymentService:
                 "amount": str(amount),
                 "description": f"Подписка {tier_data['name']} - {tier_data['accounts']} аккаунтов",
                 "hidden_message": f"Спасибо за покупку! Подписка {tier_data['name']} активирована.",
-                "paid_btn_name": "callback",
-                "paid_btn_url": "https://t.me/your_bot",  # Замените на реального бота
                 "payload": f"{user_id}:{tier}:{balance_used}",
                 "expires_in": 3600  # 1 час
             })
@@ -113,6 +112,7 @@ class PaymentService:
                         invoice_id=invoice_id
                     )
                     
+                    logger.info(f"Invoice created for user {user_id}: {invoice_id}")
                     return invoice_id, pay_url, amount, balance_used
             
             logger.error(f"Create invoice error: {response.text}")
@@ -161,7 +161,8 @@ class PaymentService:
         user_id: int,
         tier: str,
         invoice_id: str,
-        extend: bool = False
+        extend: bool = False,
+        bot: Bot = None
     ) -> bool:
         """Обработка успешного платежа"""
         try:
@@ -185,7 +186,24 @@ class PaymentService:
                     payment_amount=tier_price,
                     commission=commission
                 )
-                logger.info(f"Referral commission {commission}$ to user {referrer_id}")
+                
+                logger.info(f"Referral commission ${commission} to user {referrer_id}")
+                
+                # Уведомляем реферера
+                if bot:
+                    try:
+                        referrer = await db.get_user(referrer_id)
+                        user_username = user.get("username") or f"id{user_id}"
+                        await bot.send_message(
+                            chat_id=referrer_id,
+                            text=f"🎉 <b>Реферальный бонус!</b>\n\n"
+                                 f"Ваш друг @{user_username} оплатил подписку.\n"
+                                 f"Вам начислено: <b>${commission}</b>\n\n"
+                                 f"💰 Ваш баланс: <b>${referrer.get('balance', 0) + commission:.2f}</b>",
+                            parse_mode="HTML"
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to notify referrer {referrer_id}: {e}")
             
             return True
             
