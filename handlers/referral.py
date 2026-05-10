@@ -1,23 +1,21 @@
 """
-Реферальная программа
+Реферальная программа + вывод на xRocket
 """
 from aiogram import Router, F, Bot
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery
 from database import db
-from keyboards import back_keyboard
+from keyboards import referral_keyboard, back_keyboard
 from locales import get_text
-from config import ADMIN_ID
+from services.payment import payment_service
 import logging
 
 logger = logging.getLogger(__name__)
 router = Router()
 
-# Кэш username бота
 _bot_username: str = None
 
 
 async def get_bot_username(bot: Bot) -> str:
-    """Получить username бота (с кэшированием)"""
     global _bot_username
     if _bot_username is None:
         me = await bot.get_me()
@@ -26,53 +24,68 @@ async def get_bot_username(bot: Bot) -> str:
 
 
 @router.callback_query(F.data == "referral")
-async def callback_referral(callback: CallbackQuery, bot: Bot):
-    """Реферальная программа"""
-    user_id = callback.from_user.id
-    user = await db.get_user(user_id)
-    
+async def cb_referral(callback: CallbackQuery, bot: Bot):
+    uid = callback.from_user.id
+    user = await db.get_user(uid)
     if not user:
         await callback.answer("Напишите /start")
         return
-    
     if user.get("banned"):
-        await callback.message.edit_text(get_text("banned"))
         return
-    
-    # Получаем статистику
-    stats = await db.get_referral_stats(user_id)
-    
-    # Получаем список приглашённых
-    referrals_list = await db.get_user_referrals(user_id)
-    
-    # Формируем ссылку через username юзера
-    bot_username = await get_bot_username(bot)
-    user_username = callback.from_user.username or str(user_id)
-    referral_link = f"https://t.me/{bot_username}?start={user_username}"
-    
-    # Формируем список приглашённых
-    referrals_text = ""
+
+    stats = await db.get_referral_stats(uid)
+    referrals_list = await db.get_user_referrals(uid)
+
+    bot_uname = await get_bot_username(bot)
+    user_uname = callback.from_user.username or str(uid)
+    link = f"https://t.me/{bot_uname}?start={user_uname}"
+
+    refs_text = ""
     if referrals_list:
-        referrals_text = "\n\n👥 <b>Приглашённые:</b>\n"
-        for ref in referrals_list[:10]:  # Максимум 10
-            status = "💎" if ref.get("has_paid") else "⏳"
-            ref_username = ref.get("username") or f"id{ref['user_id']}"
-            referrals_text += f"{status} @{ref_username}\n"
+        refs_text = "\n\n👥 <b>Приглашённые:</b>\n"
+        for ref in referrals_list[:10]:
+            s = "💎" if ref.get("has_paid") else "⏳"
+            rn = ref.get("username") or f"id{ref['user_id']}"
+            refs_text += f"{s} @{rn}\n"
         if len(referrals_list) > 10:
-            referrals_text += f"<i>...и ещё {len(referrals_list) - 10}</i>\n"
-    
-    text = get_text(
-        "referral_menu",
-        link=referral_link,
-        invited=stats["invited"],
-        paid=stats["paid"],
-        earned=stats["earned"],
-        balance=round(user.get("balance", 0), 2)
-    ) + referrals_text
-    
-    await callback.message.edit_text(
-        text,
-        reply_markup=back_keyboard(),
-        parse_mode="HTML"
-    )
+            refs_text += f"<i>...и ещё {len(referrals_list) - 10}</i>\n"
+
+    text = get_text("referral_menu",
+        link=link, invited=stats["invited"], paid=stats["paid"],
+        earned_ton=stats["earned_ton"], earned_usdt=stats["earned_usdt"],
+        balance_ton=round(user.get("balance_ton", 0), 4),
+        balance_usdt=round(user.get("balance_usdt", 0), 2)
+    ) + refs_text
+
+    await callback.message.edit_text(text, reply_markup=referral_keyboard(), parse_mode="HTML")
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("withdraw_"))
+async def cb_withdraw(callback: CallbackQuery):
+    currency = callback.data.replace("withdraw_", "")
+    uid = callback.from_user.id
+
+    if currency not in ["TONCOIN", "USDT"]:
+        return
+
+    success, msg = await payment_service.withdraw(uid, currency)
+
+    if success:
+        await callback.answer(f"✅ Выведено: {msg}", show_alert=True)
+        # Обновляем меню рефералки
+        user = await db.get_user(uid)
+        stats = await db.get_referral_stats(uid)
+        bot_uname = _bot_username or "bot"
+        user_uname = callback.from_user.username or str(uid)
+        link = f"https://t.me/{bot_uname}?start={user_uname}"
+
+        text = get_text("referral_menu",
+            link=link, invited=stats["invited"], paid=stats["paid"],
+            earned_ton=stats["earned_ton"], earned_usdt=stats["earned_usdt"],
+            balance_ton=round(user.get("balance_ton", 0), 4),
+            balance_usdt=round(user.get("balance_usdt", 0), 2))
+
+        await callback.message.edit_text(text, reply_markup=referral_keyboard(), parse_mode="HTML")
+    else:
+        await callback.answer(f"❌ {msg}", show_alert=True)
