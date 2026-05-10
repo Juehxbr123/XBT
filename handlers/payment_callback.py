@@ -1,5 +1,5 @@
 """
-Обработчик проверки оплаты
+Проверка оплаты
 """
 from aiogram import Router, F, Bot
 from aiogram.types import CallbackQuery
@@ -15,98 +15,50 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-def get_account_limit(tier: str) -> int:
+def get_limit(tier: str) -> int:
     if tier == "trial":
         return TRIAL_ACCOUNTS
     return TIERS.get(tier, {}).get("accounts", 0)
 
 
-async def is_subscription_active(user: dict) -> bool:
-    if not user.get("tier") or not user.get("subscription_until"):
-        return False
-    until = user["subscription_until"]
-    if isinstance(until, str):
-        until = datetime.fromisoformat(until)
-    return until > datetime.now()
-
-
 @router.callback_query(F.data.startswith("check_"))
-async def callback_check_payment(callback: CallbackQuery, bot: Bot):
-    """Проверка оплаты"""
+async def cb_check(callback: CallbackQuery, bot: Bot):
     invoice_id = callback.data.replace("check_", "")
-    user_id = callback.from_user.id
-    
-    # Получаем платёж из БД
+    uid = callback.from_user.id
+
     payment = await db.get_payment_by_invoice(invoice_id)
-    
-    if not payment:
+    if not payment or payment["user_id"] != uid:
         await callback.answer("❌ Платёж не найден", show_alert=True)
         return
-    
-    if payment["user_id"] != user_id:
-        await callback.answer("❌ Это не ваш платёж", show_alert=True)
-        return
-    
     if payment["status"] == "paid":
-        await callback.answer("✅ Платёж уже обработан", show_alert=True)
+        await callback.answer("✅ Уже обработан", show_alert=True)
         return
-    
-    # Проверяем статус в CryptoBot
-    status_data = await payment_service.check_invoice(invoice_id)
-    status = status_data.get("status", "pending")
-    
+
+    status = await payment_service.check_invoice(invoice_id)
+
     if status == "paid":
-        user = await db.get_user(user_id)
+        user = await db.get_user(uid)
         extend = user.get("tier") == payment["tier"]
-        
-        success = await payment_service.process_successful_payment(
-            user_id=user_id,
-            tier=payment["tier"],
-            invoice_id=invoice_id,
-            extend=extend,
-            bot=bot
-        )
-        
-        if success:
-            user = await db.get_user(user_id)
+        if await payment_service.process_successful_payment(uid, payment["tier"], invoice_id, extend, bot):
+            user = await db.get_user(uid)
             until = datetime.fromisoformat(user["subscription_until"])
-            tier_data = TIERS.get(payment["tier"], {})
-            
-            current = await db.get_user_tracking_count(user_id)
-            max_accounts = get_account_limit(user["tier"])
-            
-            # Показываем успех + главное меню
-            text = get_text(
-                "payment_success",
-                tier=tier_data.get("name", payment["tier"]),
-                until=until.strftime("%d.%m.%Y")
-            )
+            td = TIERS.get(payment["tier"], {})
+            current = await db.get_user_tracking_count(uid)
+            mx = get_limit(user["tier"])
+
+            text = get_text("payment_success", tier=td.get("name", payment["tier"]), until=until.strftime("%d.%m.%Y"))
             text += f"\n\n{'─' * 20}\n\n"
-            text += get_text(
-                "welcome_subscribed",
-                tier=tier_data.get("name", payment["tier"]),
-                until=until.strftime("%d.%m.%Y"),
-                current=current,
-                max=max_accounts
-            )
-            
-            await callback.message.edit_text(
-                text,
-                reply_markup=main_menu_keyboard(current, max_accounts),
-                parse_mode="HTML"
-            )
-            
-            logger.info(f"User {user_id} payment confirmed for {payment['tier']}")
+            text += get_text("welcome_subscribed", tier=td.get("name", payment["tier"]),
+                            until=until.strftime("%d.%m.%Y"), current=current, max=mx)
+
+            await callback.message.edit_text(text, reply_markup=main_menu_keyboard(current, mx), parse_mode="HTML")
+            logger.info(f"Payment OK: {uid} -> {payment['tier']}")
         else:
             await callback.answer("❌ Ошибка активации", show_alert=True)
-    
+
     elif status == "expired":
         await db.expire_payment(invoice_id)
-        await callback.answer("❌ Счёт истёк. Создайте новый.", show_alert=True)
-        await callback.message.edit_text(
-            "❌ Счёт истёк",
-            reply_markup=back_keyboard("subscription")
-        )
-    
+        await callback.answer("❌ Счёт истёк", show_alert=True)
+        await callback.message.edit_text("❌ Счёт истёк", reply_markup=back_keyboard("subscription"))
     else:
-        await callback.answer("⏳ Ожидаем оплату...", show_alert=False)
+        await callback.answer("⏳ Ожидаем оплату...")
