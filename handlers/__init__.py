@@ -1,28 +1,18 @@
-"""
-Handlers package
-"""
 from aiogram import Router
-
 from handlers.admin import router as admin_router
-from handlers.start import router as start_router
 from handlers.tracking import router as tracking_router
+from handlers.start import router as start_router
 from handlers.subscription import router as subscription_router
-from handlers.filters import router as filters_router
 from handlers.referral import router as referral_router
 from handlers.payment_callback import router as payment_router
 
 
 def setup_routers() -> Router:
-    """Настройка всех роутеров"""
     main_router = Router()
-    
-    # Важно: admin первый, потом tracking (с FSM), потом остальные
     main_router.include_router(admin_router)
-    main_router.include_router(tracking_router)  # FSM хендлеры
+    main_router.include_router(tracking_router)
     main_router.include_router(start_router)
     main_router.include_router(subscription_router)
-    main_router.include_router(filters_router)
     main_router.include_router(referral_router)
     main_router.include_router(payment_router)
-    
     return main_router
